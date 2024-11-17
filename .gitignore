@@ -3,3 +3,4 @@ __pycache__/
 qzone_photo/
 chromedriver*
 .DS_Store
+venv

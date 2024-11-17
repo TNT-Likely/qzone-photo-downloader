@@ -7,6 +7,11 @@ from collections import namedtuple
 
 import requests
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from PIL import Image
+from io import BytesIO
+from datetime import datetime
+import piexif
 
 from io_in_out import *
 
@@ -14,7 +19,7 @@ curpath = os.path.dirname(os.path.realpath(__file__))
 curpath = io_in_arg(curpath)
 
 QzoneAlbum = namedtuple('QzoneAlbum', ['uid', 'name', 'count'])
-QzonePhoto = namedtuple('QzonePhoto', ['url', 'name', 'album', 'is_video'])
+QzonePhoto = namedtuple('QzonePhoto', ['url', 'name', 'album', 'is_video', 'uploadtime', 'modifytime'])
 
 app_config = {
     "max_workers": 20,  # 并行下载线程数量
@@ -106,8 +111,38 @@ def func_save_photo(arg):
         return
     c = req.content
 
-    with open(c_p, 'wb') as f:
-        f.write(c)
+    # with open(c_p, 'wb') as f:
+    #     f.write(c)
+
+    # 使用 Pillow 读取和保存图片，保留或添加 EXIF 信息
+    img = Image.open(BytesIO(c))
+    exif_data = img.info.get('exif', None)  # 获取 EXIF 信息
+
+    # 如果需要添加新的 EXIF 信息
+    if exif_data is None:
+        exif_data = b''  # 初始化为空字节
+
+    # 添加新的 EXIF 信息（例如，拍摄日期）
+    from PIL.ExifTags import TAGS, GPSTAGS
+    exif_dict = {}
+    if exif_data:
+        exif_dict = img._getexif() or {}
+
+    # 添加新的 EXIF 标签
+    exif_dict[36867] = photo[4]  # 添加拍摄日期，标签 36867 对应 DateTimeOriginal
+
+    # 将字典转换回 EXIF 数据
+    new_exif_data = piexif.dump(exif_dict)
+
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+
+    # 保存图片并保留或添加 EXIF 信息
+    img.save(c_p, format='JPEG', exif=new_exif_data)
+
+    # 设置文件的最后修改时间和访问时间为过去某个时间
+    target_timestamp = photo[5]
+    os.utime(c_p, (target_timestamp, target_timestamp))  # 设置访问时间和修改时间
 
 
 class QzonePhotoManager(object):
@@ -135,8 +170,8 @@ class QzonePhotoManager(object):
     def __init__(self, user, password):
         self.user = user
         self.password = password
-
-        driver = webdriver.Chrome('./chromedriver')
+        options = Options()
+        driver = webdriver.Chrome(options)
         # 使用 get() 方法打开待抓取的 URL
         driver.get('http://user.qzone.qq.com')
         time.sleep(15)
@@ -270,7 +305,7 @@ class QzonePhotoManager(object):
                                 pic_url = i['raw']
                             else:
                                 pic_url = i['url']
-                            photos.append(QzonePhoto._make([pic_url, i['name'], album, i['is_video']]))
+                            photos.append(QzonePhoto._make([pic_url, i['name'], album, i['is_video'], i['uploadtime'], i['modifytime']]))
                     # 如果第一次总数就已经是获取到的数量，就说明只有第一页，不需要继续下一页
                     if totalInAlbum == totalInPage:
                         return photos
@@ -326,12 +361,12 @@ class QzonePhotoManager(object):
 
 def entry():
     # 你的 QQ和密码，QQ号必须写，密码可以省略，然后使用网页快速登录功能
-    main_user = 123456
+    main_user = 532837139
     main_pass = ''
 
     # 要处理的目标 QQ 号，此处可填入多个QQ号，中间用逗号隔开
     dest_users = [
-        123456,
+        532837139,
     ]
 
     a = QzonePhotoManager(main_user, main_pass)
